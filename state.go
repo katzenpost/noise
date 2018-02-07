@@ -198,9 +198,9 @@ const (
 	MessagePatternEKEM1
 )
 
-// MaxMsgLen is the maximum number of bytes that can be sent in a single Noise
-// message.
-const MaxMsgLen = 65535
+// DefaultMaxMsgLen is the default maximum number of bytes that can be sent in
+// a single Noise message.
+const DefaultMaxMsgLen = 65535
 
 // A HandshakeState tracks the state of a Noise handshake. It may be discarded
 // after the handshake is complete.
@@ -218,6 +218,7 @@ type HandshakeState struct {
 	initiator       bool
 	msgIdx          int
 	rng             io.Reader
+	maxMsgLen       int
 }
 
 // A Config provides the details necessary to process a Noise handshake. It is
@@ -263,6 +264,10 @@ type Config struct {
 	// PeerEphemeral is the ephemeral public key of the remote peer that was
 	// provided as a pre-message in the handshake.
 	PeerEphemeral []byte
+
+	// MaxMsgLen is the maximum number of bytes that can be sent in a single
+	// Noise message.
+	MaxMsgLen int
 }
 
 // NewHandshakeState starts a new handshake using the provided configuration.
@@ -276,6 +281,7 @@ func NewHandshakeState(c Config) (*HandshakeState, error) {
 		shouldWrite:     c.Initiator,
 		initiator:       c.Initiator,
 		rng:             c.Random,
+		maxMsgLen:       c.MaxMsgLen,
 	}
 	if hs.rng == nil {
 		hs.rng = rand.Reader
@@ -283,6 +289,9 @@ func NewHandshakeState(c Config) (*HandshakeState, error) {
 	if len(c.PeerEphemeral) > 0 {
 		hs.re = make([]byte, len(c.PeerEphemeral))
 		copy(hs.re, c.PeerEphemeral)
+	}
+	if c.MaxMsgLen <= 0 {
+		hs.maxMsgLen = DefaultMaxMsgLen
 	}
 	hs.ss.cs = c.CipherSuite
 	pskModifier := ""
@@ -340,7 +349,7 @@ func (s *HandshakeState) WriteMessage(out, payload []byte) ([]byte, *CipherState
 	if s.msgIdx > len(s.messagePatterns)-1 {
 		return nil, nil, nil, errors.New("noise: no handshake messages left")
 	}
-	if len(payload) > MaxMsgLen {
+	if len(payload) > s.maxMsgLen {
 		return nil, nil, nil, errors.New("noise: message is too long")
 	}
 
