@@ -139,6 +139,51 @@ func (NoiseSuite) TestXX(c *C) {
 	c.Assert(msg, DeepEquals, expected)
 }
 
+func (NoiseSuite) TestXXHFSKyber(c *C) {
+	cs := NewCipherSuiteHFS(DH25519, CipherChaChaPoly, HashBLAKE2b, HFSKyber)
+	rngI := new(RandomInc)
+	rngR := new(RandomInc)
+	*rngR = 1
+
+	staticI, _ := cs.GenerateKeypair(rngI)
+	staticR, _ := cs.GenerateKeypair(rngR)
+
+	hsI, _ := NewHandshakeState(Config{
+		CipherSuite:   cs,
+		Random:        rngI,
+		Pattern:       HandshakeXX,
+		Initiator:     true,
+		StaticKeypair: staticI,
+	})
+	hsR, _ := NewHandshakeState(Config{
+		CipherSuite:   cs,
+		Random:        rngR,
+		Pattern:       HandshakeXX,
+		StaticKeypair: staticR,
+	})
+
+	msg, _, _, _ := hsI.WriteMessage(nil, []byte("abc"))
+	c.Assert(msg, HasLen, 35)
+	res, _, _, err := hsR.ReadMessage(nil, msg)
+	c.Assert(err, IsNil)
+	c.Assert(string(res), Equals, "abc")
+
+	msg, _, _, _ = hsR.WriteMessage(nil, []byte("defg"))
+	c.Assert(msg, HasLen, 100)
+	res, _, _, err = hsI.ReadMessage(nil, msg)
+	c.Assert(err, IsNil)
+	c.Assert(string(res), Equals, "defg")
+
+	msg, _, _, _ = hsI.WriteMessage(nil, nil)
+	c.Assert(msg, HasLen, 64)
+	res, _, _, err = hsR.ReadMessage(nil, msg)
+	c.Assert(err, IsNil)
+	c.Assert(res, HasLen, 0)
+
+	expected, _ := hex.DecodeString("edc015f7c25efc043e0f121858a2f4fb7ca28ec87040f06dfaf8a38f5bc539cee43146e559319cc4f74a99c4d301d42f17b310bf6f74075c65fd9fd098d44966")
+	c.Assert(msg, DeepEquals, expected)
+}
+
 func (NoiseSuite) TestIK(c *C) {
 	cs := NewCipherSuite(DH25519, CipherAESGCM, HashSHA256)
 	rngI := new(RandomInc)

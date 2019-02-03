@@ -19,7 +19,7 @@ package noise
 import (
 	"io"
 
-	"git.schwanenlied.me/yawning/newhope.git"
+	"git.schwanenlied.me/yawning/kyber"
 )
 
 type HFSKey interface {
@@ -56,95 +56,95 @@ type HFSFunc interface {
 	HFSName() string
 }
 
-// HFSNewHopeSimple is the NewHope-Simple HFS function.
-var HFSNewHopeSimple HFSFunc = hfsNewHopeSimple{}
+// HFSKyber is the Kyber crypto_kem_keypair HFS function.
+var HFSKyber HFSFunc = hfsKyber{}
 
-type hfsNewHopeSimple struct{}
+type hfsKyber struct{}
 
-type keyNewHopeSimpleAlice struct {
-	privKey *newhope.PrivateKeySimpleAlice
-	pubKey  *newhope.PublicKeySimpleAlice
+type keyKyberInitiator struct {
+	privKey *kyber.PrivateKey
+	pubKey  *kyber.PublicKey
 }
 
-func (k *keyNewHopeSimpleAlice) Public() []byte {
-	return k.pubKey.Send[:]
+func (k *keyKyberInitiator) Public() []byte {
+	return k.pubKey.Bytes()
 }
 
-type keyNewHopeSimpleBob struct {
-	pubKey *newhope.PublicKeySimpleBob
+type keyKyberResponder struct {
+	pubKey *kyber.PublicKey
 	shared []byte
 }
 
-func (k *keyNewHopeSimpleBob) Public() []byte {
-	return k.pubKey.Send[:]
+func (k *keyKyberResponder) Public() []byte {
+	return k.pubKey.Bytes()
 }
 
-func (hfsNewHopeSimple) GenerateKeypairF(rng io.Reader, rf []byte) HFSKey {
+func (h hfsKyber) GenerateKeypairF(rng io.Reader, rf []byte) HFSKey {
 	if rf != nil {
-		if len(rf) != newhope.SendASimpleSize {
-			panic("noise/hfs: rf is not SendASimpleSize")
+		if len(rf) != h.FLen1() {
+			panic("noise/hfs: rf is not Kyber1024.PublicKeySize")
 		}
-		var alicePk newhope.PublicKeySimpleAlice
-		copy(alicePk.Send[:], rf)
-
-		pubKey, shared, err := newhope.KeyExchangeSimpleBob(rng, &alicePk)
+		initiatorPk, err := kyber.Kyber1024.PublicKeyFromBytes(rf)
 		if err != nil {
-			panic("noise/hfs: newhope.KeyExchangeSimpleBob(): " + err.Error())
+			panic("noise/hfs: rf deserialization error: " + err.Error())
 		}
 
-		return &keyNewHopeSimpleBob{
+		cipherText, shared, err := initiatorPk.KEMEncrypt(rng)
+		if err != nil {
+			panic("noise/hfs: Kyber KEMEncrypt error: " + err.Error())
+		}
+
+		pubKey, err := kyber.Kyber1024.PublicKeyFromBytes(cipherText)
+		if err != nil {
+			panic("noise/hfs: rf deserialization error: " + err.Error())
+		}
+
+		return &keyKyberResponder{
 			pubKey: pubKey,
 			shared: shared,
 		}
 	}
 
-	// Generate the keypair as Alice.
-	privKey, pubKey, err := newhope.GenerateKeyPairSimpleAlice(rng)
+	// Generate the keypair as Initiator.
+	pubKey, privKey, err := kyber.Kyber1024.GenerateKeyPair(rng)
 	if err != nil {
-		panic("noise/hfs: newhope.GenerateKeypairSimpleAlice(): " + err.Error())
+		panic("noise/hfs: kyber.Kyber1024.GenerateKeyPair(): " + err.Error())
 	}
 
-	return &keyNewHopeSimpleAlice{
+	return &keyKyberInitiator{
 		privKey: privKey,
 		pubKey:  pubKey,
 	}
 }
 
-func (hfsNewHopeSimple) FF(keypair HFSKey, pubkey []byte) []byte {
+func (h hfsKyber) FF(keypair HFSKey, pubkey []byte) []byte {
 	switch k := keypair.(type) {
-	case *keyNewHopeSimpleAlice:
-		if len(pubkey) != newhope.SendBSimpleSize {
-			panic("noise/hfs: pubkey is not SendBSimpleSize")
+	case *keyKyberInitiator:
+		if len(pubkey) != h.FLen1() {
+			panic("noise/hfs: pubkey is not Kyber1024.PublicKeySize")
 		}
-		var bobPk newhope.PublicKeySimpleBob
-		copy(bobPk.Send[:], pubkey[:])
-
-		s, err := newhope.KeyExchangeSimpleAlice(&bobPk, k.privKey)
-		if err != nil {
-			panic("noise/hfs: newhope.KeyExchangeSimpleAlice(): " + err.Error())
-		}
-		return s
-	case *keyNewHopeSimpleBob:
+		return k.privKey.KEMDecrypt(pubkey)
+	case *keyKyberResponder:
 		return k.shared
 	default:
 	}
 	panic("noise/fs: FF(): unsupported keypair type")
 }
 
-func (hfsNewHopeSimple) FLen1() int {
-	return newhope.SendASimpleSize
+func (hfsKyber) FLen1() int {
+	return kyber.Kyber1024.PublicKeySize()
 }
 
-func (hfsNewHopeSimple) FLen2() int {
-	return newhope.SendBSimpleSize
+func (hfsKyber) FLen2() int {
+	return kyber.Kyber1024.CipherTextSize()
 }
 
-func (hfsNewHopeSimple) FLen() int {
-	return newhope.SharedSecretSize
+func (hfsKyber) FLen() int {
+	return kyber.SymSize
 }
 
-func (hfsNewHopeSimple) HFSName() string {
-	return "NewHopeSimple"
+func (hfsKyber) HFSName() string {
+	return "Kyber"
 }
 
 var hfsNull HFSFunc = hfsNullImpl{}
