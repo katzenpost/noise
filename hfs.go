@@ -22,6 +22,8 @@ import (
 	"git.schwanenlied.me/yawning/newhope.git"
 )
 
+// HFSKey is the public part of KeyPair needed for the Hybrid Forward Secrecy
+// algorithm
 type HFSKey interface {
 	Public() []byte
 }

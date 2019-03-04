@@ -62,6 +62,7 @@ func (s *CipherState) Cipher() Cipher {
 	return s.c
 }
 
+// Rekey generates another s.k
 func (s *CipherState) Rekey() {
 	var zeros [32]byte
 	var out []byte
@@ -187,15 +188,37 @@ type HandshakePattern struct {
 }
 
 const (
+	// MessagePatternS is a message pattern that includes the token 's' (static)
+	// See: http://noiseprotocol.org/noise.html, section 7.1.
 	MessagePatternS MessagePattern = iota
+	// MessagePatternE is a message pattern that includes the token 'e' (ephemeral)
+	// See: http://noiseprotocol.org/noise.html, section 7.1.
 	MessagePatternE
+	// MessagePatternDHEE is a message pattern, corresponding to a DH handshake
+	// that includes the token 'ee'.
+	// See: http://noiseprotocol.org/noise.html, section 7.1.
 	MessagePatternDHEE
+	// MessagePatternDHES is a message pattern, corresponding to a DH handshake
+	// that includes the token 'es'.
+	// See: http://noiseprotocol.org/noise.html, section 7.1.
 	MessagePatternDHES
+	// MessagePatternDHSE is a message pattern, corresponding to a DH handshake
+	// that includes the token 'se'.
+	// See: http://noiseprotocol.org/noise.html, section 7.1.
 	MessagePatternDHSE
+	// MessagePatternDHSS is a message pattern, corresponding to a DH handshake
+	// that includes the token 'ss'.
+	// See: http://noiseprotocol.org/noise.html, section 7.1.
 	MessagePatternDHSS
+	// MessagePatternPSK is a message pattern, corresponding to a PSK handshake.
+	// See: http://noiseprotocol.org/noise.html, section 9.
 	MessagePatternPSK
 
+	// MessagePatternF is a message pattern, corresponding to a Hybrid Forward Secrecy
+	// algorithm.
 	MessagePatternF
+	// MessagePatternFF is a message pattern, corresponding to a Hybrid Forward Secrecy
+	// algorithm.
 	MessagePatternFF
 )
 

@@ -92,7 +92,7 @@ func NewCipherSuite(dh DHFunc, c CipherFunc, h HashFunc) CipherSuite {
 	}
 }
 
-// NewCipherSuite HFS returns a CipherSuite constructed from the specified
+// NewCipherSuiteHFS returns a CipherSuite constructed from the specified
 // primitives, with the Hybrid Forward Secrecy extension.
 func NewCipherSuiteHFS(dh DHFunc, c CipherFunc, h HashFunc, hfs HFSFunc) CipherSuite {
 	return ciphersuite{
