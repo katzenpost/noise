@@ -19,7 +19,7 @@ package noise
 import (
 	"io"
 
-	"git.schwanenlied.me/yawning/newhope.git"
+	"github.com/katzenpost/newhope"
 )
 
 type HFSKey interface {
