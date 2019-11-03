@@ -201,7 +201,7 @@ const (
 
 // DefaultMaxMsgLen is the default maximum number of bytes that can be sent in
 // a single Noise message.
-const DefaultMaxMsgLen = 65535
+const DefaultMaxMsgLen = 5242880 // 5MB
 
 // A HandshakeState tracks the state of a Noise handshake. It may be discarded
 // after the handshake is complete.
