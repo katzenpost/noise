@@ -1,5 +1,5 @@
 // hfs.go - Hybrid Forward Secrecy extension.
-// Copyright (C) 2017  Yawning Angel.
+// Copyright (C) 2021  David Stainton.
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as
@@ -19,155 +19,142 @@ package noise
 import (
 	"io"
 
-	"github.com/katzenpost/newhope"
+	"github.com/cloudflare/circl/kem/kyber/kyber1024"
 )
 
-type HFSKey interface {
-	Public() []byte
+type HFSDecapsulationKey interface {
+	DecapsulateTo(sharedSecret, ciphertext []byte)
 }
 
-// HFSFunc implements a hybrid forward secrecy function, for the Noise HFS
-// extension (version 1draft-5).
+type HFSKeyPair interface {
+	Public() []byte
+	Private() HFSDecapsulationKey
+}
+
+// HFSFunc implements a KEM-based Hybrid Forward Secrecy for Noise.
 //
-// See: https://github.com/noiseprotocol/noise_spec/blob/master/extensions/ext_hybrid_forward_secrecy.md
+// See: https://github.com/noiseprotocol/noise_hfs_spec/blob/master/output/noise_hfs.pdf
 type HFSFunc interface {
-	// GenerateKeypairF generates a new key pair for the hybrid forward
-	// secrecy algorithm relative to a remote public key rf. The rf value
-	// will be empty for the first "f" token in the handshake, and non-empty
-	// for the second "f" token.
-	GenerateKeypairF(rng io.Reader, rf []byte) HFSKey
+	// GenerateKEMKeypair generates a new KEM key pair.
+	GenerateKEMKeypair(rng io.Reader) HFSKeyPair
 
-	// FF performs a hybrid forward secrecy calculation that mixes a local key
-	// pair with a remote public key.
-	FF(keypair HFSKey, pubkey []byte) []byte
+	// GenerateKEMCiphertext generates both a ciphertext
+	// and a KEM output given the remote party's public key.
+	GenerateKEMCiphertext(pubkey []byte, rng io.Reader) (ciphertext, sharedSecret []byte)
 
-	// FLen1 is a constant specifying the size in bytes of the output from
-	// GenerateKeypairF(rf) when rf is empty.
-	FLen1() int
+	// KEM performs calculation between the private key in the key pair
+	// and the ciphertext and returns a sharedSecret.
+	KEM(keyPair HFSKeyPair, ciphertext []byte) (sharedSecret []byte)
 
-	// Flen2 is a constant specifying the size in bytes of the output from
-	// GenerateKeypairF(rf) when rf is not empty.
-	FLen2() int
+	// PublicKeySize returns the size of the serialized public key.
+	PublicKeySize() int
 
-	// FLen is constant specifying the size in bytes of the output from FF().
-	FLen() int
+	// CiphertextSize returns the size of the KEM ciphertext.
+	CiphertextSize() int
+
+	// SharedKeySize returns the size of the KEM shared secret.
+	SharedKeySize() int
 
 	// HFSName is the name of the HFS function.
 	HFSName() string
 }
 
-// HFSNewHopeSimple is the NewHope-Simple HFS function.
-var HFSNewHopeSimple HFSFunc = hfsNewHopeSimple{}
+// HFSKyber is the Kyber crypto_kem_keypair HFS function.
+var HFSKyber HFSFunc = hfsKyber{}
 
-type hfsNewHopeSimple struct{}
+type hfsKyber struct{}
 
-type keyNewHopeSimpleAlice struct {
-	privKey *newhope.PrivateKeySimpleAlice
-	pubKey  *newhope.PublicKeySimpleAlice
+type keyKyberInitiator struct {
+	privKey *kyber1024.PrivateKey
+	pubKey  *kyber1024.PublicKey
 }
 
-func (k *keyNewHopeSimpleAlice) Public() []byte {
-	return k.pubKey.Send[:]
+func (k *keyKyberInitiator) Public() []byte {
+	var ret [kyber1024.PublicKeySize]byte
+	k.pubKey.Pack(ret[:])
+	return ret[:]
 }
 
-type keyNewHopeSimpleBob struct {
-	pubKey *newhope.PublicKeySimpleBob
-	shared []byte
+func (k *keyKyberInitiator) Private() HFSDecapsulationKey {
+	return k.privKey
 }
 
-func (k *keyNewHopeSimpleBob) Public() []byte {
-	return k.pubKey.Send[:]
-}
-
-func (hfsNewHopeSimple) GenerateKeypairF(rng io.Reader, rf []byte) HFSKey {
-	if rf != nil {
-		if len(rf) != newhope.SendASimpleSize {
-			panic("noise/hfs: rf is not SendASimpleSize")
-		}
-		var alicePk newhope.PublicKeySimpleAlice
-		copy(alicePk.Send[:], rf)
-
-		pubKey, shared, err := newhope.KeyExchangeSimpleBob(rng, &alicePk)
-		if err != nil {
-			panic("noise/hfs: newhope.KeyExchangeSimpleBob(): " + err.Error())
-		}
-
-		return &keyNewHopeSimpleBob{
-			pubKey: pubKey,
-			shared: shared,
-		}
-	}
-
-	// Generate the keypair as Alice.
-	privKey, pubKey, err := newhope.GenerateKeyPairSimpleAlice(rng)
+func (hfsKyber) GenerateKEMKeypair(rng io.Reader) HFSKeyPair {
+	pubKey, privKey, err := kyber1024.GenerateKeyPair(rng)
 	if err != nil {
-		panic("noise/hfs: newhope.GenerateKeypairSimpleAlice(): " + err.Error())
+		panic("noise/hfs: kyber1024.GenerateKeyPair: " + err.Error())
 	}
-
-	return &keyNewHopeSimpleAlice{
+	return &keyKyberInitiator{
 		privKey: privKey,
 		pubKey:  pubKey,
 	}
 }
 
-func (hfsNewHopeSimple) FF(keypair HFSKey, pubkey []byte) []byte {
-	switch k := keypair.(type) {
-	case *keyNewHopeSimpleAlice:
-		if len(pubkey) != newhope.SendBSimpleSize {
-			panic("noise/hfs: pubkey is not SendBSimpleSize")
-		}
-		var bobPk newhope.PublicKeySimpleBob
-		copy(bobPk.Send[:], pubkey[:])
-
-		s, err := newhope.KeyExchangeSimpleAlice(&bobPk, k.privKey)
-		if err != nil {
-			panic("noise/hfs: newhope.KeyExchangeSimpleAlice(): " + err.Error())
-		}
-		return s
-	case *keyNewHopeSimpleBob:
-		return k.shared
-	default:
+func (h hfsKyber) GenerateKEMCiphertext(pubkey []byte, rng io.Reader) (ciphertext, sharedSecret []byte) {
+	if len(pubkey) != h.PublicKeySize() {
+		panic("noise/hfs: PublicKey is not kyber1024.PublicKeySize")
 	}
-	panic("noise/fs: FF(): unsupported keypair type")
+	alicePubKey := new(kyber1024.PublicKey)
+	alicePubKey.Unpack(pubkey)
+	ciphertext = make([]byte, kyber1024.CiphertextSize)
+	sharedSecret = make([]byte, kyber1024.SharedKeySize)
+	seed := make([]byte, kyber1024.EncapsulationSeedSize)
+	_, err := rng.Read(seed)
+	if err != nil {
+		panic(err)
+	}
+	alicePubKey.EncapsulateTo(ciphertext, sharedSecret, seed)
+	return ciphertext, sharedSecret
 }
 
-func (hfsNewHopeSimple) FLen1() int {
-	return newhope.SendASimpleSize
+func (hfsKyber) KEM(keyPair HFSKeyPair, ciphertext []byte) (sharedSecret []byte) {
+	sharedSecret = make([]byte, kyber1024.SharedKeySize)
+	privKey := keyPair.Private()
+	privKey.DecapsulateTo(sharedSecret, ciphertext)
+	return sharedSecret
 }
 
-func (hfsNewHopeSimple) FLen2() int {
-	return newhope.SendBSimpleSize
+func (hfsKyber) PublicKeySize() int {
+	return kyber1024.PublicKeySize
 }
 
-func (hfsNewHopeSimple) FLen() int {
-	return newhope.SharedSecretSize
+func (hfsKyber) CiphertextSize() int {
+	return kyber1024.CiphertextSize
 }
 
-func (hfsNewHopeSimple) HFSName() string {
-	return "NewHopeSimple"
+func (hfsKyber) SharedKeySize() int {
+	return kyber1024.SharedKeySize
+}
+
+func (hfsKyber) HFSName() string {
+	return "kyber1024"
 }
 
 var hfsNull HFSFunc = hfsNullImpl{}
 
 type hfsNullImpl struct{}
 
-func (hfsNullImpl) GenerateKeypairF(r io.Reader, rf []byte) HFSKey {
-	panic("noise/hfs: GenerateKeypairF called for null HFS")
+func (hfsNullImpl) GenerateKEMKeypair(rng io.Reader) HFSKeyPair {
+	panic("noise/hfs: GenerateKEMKeypair called for null HFS")
 }
 
-func (hfsNullImpl) FF(keypair HFSKey, pubkey []byte) []byte {
-	panic("noise/hfs: FF called for null HFS")
+func (hfsNullImpl) GenerateKEMCiphertext(pubkey []byte, rng io.Reader) (ciphertext, sharedSecret []byte) {
+	panic("noise/hfs: GenerateKEMCiphertext called for null HFS")
 }
 
-func (hfsNullImpl) FLen1() int {
+func (hfsNullImpl) KEM(keypair HFSKeyPair, ciphertext []byte) []byte {
+	panic("noise/hfs: KEM called for null HFS")
+}
+
+func (hfsNullImpl) PublicKeySize() int {
 	return 0
 }
 
-func (hfsNullImpl) FLen2() int {
+func (hfsNullImpl) CiphertextSize() int {
 	return 0
 }
 
-func (hfsNullImpl) FLen() int {
+func (hfsNullImpl) SharedKeySize() int {
 	return 0
 }
 

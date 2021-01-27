@@ -194,9 +194,8 @@ const (
 	MessagePatternDHSE
 	MessagePatternDHSS
 	MessagePatternPSK
-
-	MessagePatternF
-	MessagePatternFF
+	MessagePatternE1
+	MessagePatternEKEM1
 )
 
 // DefaultMaxMsgLen is the default maximum number of bytes that can be sent in
@@ -207,13 +206,13 @@ const DefaultMaxMsgLen = 65535
 // after the handshake is complete.
 type HandshakeState struct {
 	ss              symmetricState
-	s               DHKey  // local static keypair
-	e               DHKey  // local ephemeral keypair
-	f               HFSKey // local HFS keypair
-	rs              []byte // remote party's static public key
-	re              []byte // remote party's ephemeral public key
-	rf              []byte // remote party's HFS public key
-	psk             []byte // preshared key, maybe zero length
+	s               DHKey      // local static keypair
+	e               DHKey      // local ephemeral keypair
+	hfsKeyPair      HFSKeyPair // local HFS keypair
+	rs              []byte     // remote party's static public key
+	re              []byte     // remote party's ephemeral public key
+	rHFSPubKey      []byte     // remote party's HFS public key
+	psk             []byte     // preshared key, maybe zero length
 	messagePatterns [][]MessagePattern
 	shouldWrite     bool
 	initiator       bool
@@ -310,8 +309,6 @@ func NewHandshakeState(c Config) (*HandshakeState, error) {
 	}
 	hs.ss.InitializeSymmetric([]byte("Noise_" + c.Pattern.Name + pskModifier + "_" + string(hs.ss.cs.Name())))
 	hs.ss.MixHash(c.Prologue)
-	// TODO: Technically r/rf can be part of the pre-message state, but we
-	// don't use it, so punt on supporting it.
 	for _, m := range c.Pattern.InitiatorPreMessages {
 		switch {
 		case c.Initiator && m == MessagePatternS:
@@ -392,11 +389,13 @@ func (s *HandshakeState) WriteMessage(out, payload []byte) ([]byte, *CipherState
 			s.ss.MixKey(s.ss.cs.DH(s.s.Private, s.rs))
 		case MessagePatternPSK:
 			s.ss.MixKeyAndHash(s.psk)
-		case MessagePatternF:
-			s.f = s.ss.cs.GenerateKeypairF(s.rng, s.rf)
-			out = s.ss.EncryptAndHash(out, s.f.Public())
-		case MessagePatternFF:
-			s.ss.MixKey(s.ss.cs.FF(s.f, s.rf))
+		case MessagePatternE1:
+			s.hfsKeyPair = s.ss.cs.GenerateKEMKeypair(s.rng)
+			out = s.ss.EncryptAndHash(out, s.hfsKeyPair.Public())
+		case MessagePatternEKEM1:
+			ciphertext, sharedSecret := s.ss.cs.GenerateKEMCiphertext(s.rHFSPubKey, s.rng)
+			out = s.ss.EncryptAndHash(out, ciphertext)
+			s.ss.MixKey(sharedSecret)
 		}
 	}
 	s.shouldWrite = false
@@ -480,25 +479,35 @@ func (s *HandshakeState) ReadMessage(out, message []byte) ([]byte, *CipherState,
 			s.ss.MixKey(s.ss.cs.DH(s.s.Private, s.rs))
 		case MessagePatternPSK:
 			s.ss.MixKeyAndHash(s.psk)
-		case MessagePatternF:
-			expected := s.ss.cs.FLen1()
-			if s.f != nil {
-				expected = s.ss.cs.FLen2()
-			}
+		case MessagePatternE1:
+			expected := s.ss.cs.PublicKeySize()
 			if s.ss.hasK {
 				expected += 16
 			}
 			if len(message) < expected {
 				return nil, nil, nil, ErrShortMessage
 			}
-			s.rf, err = s.ss.DecryptAndHash(nil, message[:expected])
+			s.rHFSPubKey, err = s.ss.DecryptAndHash(nil, message[:expected])
 			if err != nil {
 				s.ss.Rollback()
 				return nil, nil, nil, err
 			}
 			message = message[expected:]
-		case MessagePatternFF:
-			s.ss.MixKey(s.ss.cs.FF(s.f, s.rf))
+		case MessagePatternEKEM1:
+			expected := s.ss.cs.CiphertextSize()
+			if s.ss.hasK {
+				expected += 16
+			}
+			if len(message) < expected {
+				return nil, nil, nil, ErrShortMessage
+			}
+			kemCiphertext, err := s.ss.DecryptAndHash(nil, message[:expected])
+			if err != nil {
+				s.ss.Rollback()
+				return nil, nil, nil, err
+			}
+			s.ss.MixKey(s.ss.cs.KEM(s.hfsKeyPair, kemCiphertext))
+			message = message[expected:]
 		}
 	}
 	out, err = s.ss.DecryptAndHash(out, message)
@@ -529,4 +538,22 @@ func (s *HandshakeState) ChannelBinding() []byte {
 // containing a static key has not been read.
 func (s *HandshakeState) PeerStatic() []byte {
 	return s.rs
+}
+
+// MessageIndex returns the current handshake message id
+func (s *HandshakeState) MessageIndex() int {
+	return s.msgIdx
+}
+
+// PeerEphemeral returns the ephemeral key provided by the remote peer during
+// a handshake. It is an error to call this method if a handshake message
+// containing a static key has not been read.
+func (s *HandshakeState) PeerEphemeral() []byte {
+	return s.re
+}
+
+// LocalEphemeral returns the local ephemeral key pair generated during
+// a handshake.
+func (s *HandshakeState) LocalEphemeral() DHKey {
+	return s.e
 }
