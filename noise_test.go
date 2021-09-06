@@ -295,19 +295,22 @@ func (NoiseSuite) TestXXhfsKyberRoundtrip(c *C) {
 	c.Assert(string(res), Equals, payload)
 
 	// transport message I -> R
-	msg = csI0.Encrypt(nil, nil, []byte("wubba"))
+	msg, err = csI0.Encrypt(nil, nil, []byte("wubba"))
+	c.Assert(err, IsNil)
 	res, err = csR0.Decrypt(nil, nil, msg)
 	c.Assert(err, IsNil)
 	c.Assert(string(res), Equals, "wubba")
 
 	// transport message I -> R again
-	msg = csI0.Encrypt(nil, nil, []byte("aleph"))
+	msg, err = csI0.Encrypt(nil, nil, []byte("aleph"))
+	c.Assert(err, IsNil)
 	res, err = csR0.Decrypt(nil, nil, msg)
 	c.Assert(err, IsNil)
 	c.Assert(string(res), Equals, "aleph")
 
 	// transport message R <- I
-	msg = csR1.Encrypt(nil, nil, []byte("worri"))
+	msg, err = csR1.Encrypt(nil, nil, []byte("worri"))
+	c.Assert(err, IsNil)
 	res, err = csI1.Decrypt(nil, nil, msg)
 	c.Assert(err, IsNil)
 	c.Assert(string(res), Equals, "worri")
