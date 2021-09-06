@@ -446,10 +446,16 @@ func (s *HandshakeState) WriteMessage(out, payload []byte) ([]byte, *CipherState
 			s.ss.MixKeyAndHash(s.psk)
 		case MessagePatternE1:
 			s.hfsKeyPair = s.ss.cs.GenerateKEMKeypair(s.rng)
-			out = s.ss.EncryptAndHash(out, s.hfsKeyPair.Public())
+			out, err = s.ss.EncryptAndHash(out, s.hfsKeyPair.Public())
+			if err != nil {
+				return nil, nil, nil, err
+			}
 		case MessagePatternEKEM1:
 			ciphertext, sharedSecret := s.ss.cs.GenerateKEMCiphertext(s.rHFSPubKey, s.rng)
-			out = s.ss.EncryptAndHash(out, ciphertext)
+			out, err = s.ss.EncryptAndHash(out, ciphertext)
+			if err != nil {
+				return nil, nil, nil, err
+			}
 			s.ss.MixKey(sharedSecret)
 		}
 	}
