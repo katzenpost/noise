@@ -2,6 +2,7 @@ package noise
 
 import (
 	"encoding/hex"
+	"math"
 	"testing"
 
 	. "gopkg.in/check.v1"
@@ -227,19 +228,22 @@ func (NoiseSuite) TestXXRoundtrip(c *C) {
 	c.Assert(string(res), Equals, payload)
 
 	// transport message I -> R
-	msg = csI0.Encrypt(nil, nil, []byte("wubba"))
+	msg, err = csI0.Encrypt(nil, nil, []byte("wubba"))
+	c.Assert(err, IsNil)
 	res, err = csR0.Decrypt(nil, nil, msg)
 	c.Assert(err, IsNil)
 	c.Assert(string(res), Equals, "wubba")
 
 	// transport message I -> R again
-	msg = csI0.Encrypt(nil, nil, []byte("aleph"))
+	msg, err = csI0.Encrypt(nil, nil, []byte("aleph"))
+	c.Assert(err, IsNil)
 	res, err = csR0.Decrypt(nil, nil, msg)
 	c.Assert(err, IsNil)
 	c.Assert(string(res), Equals, "aleph")
 
 	// transport message R <- I
-	msg = csR1.Encrypt(nil, nil, []byte("worri"))
+	msg, err = csR1.Encrypt(nil, nil, []byte("worri"))
+	c.Assert(err, IsNil)
 	res, err = csI1.Decrypt(nil, nil, msg)
 	c.Assert(err, IsNil)
 	c.Assert(string(res), Equals, "worri")
@@ -344,13 +348,15 @@ func (NoiseSuite) Test_NNpsk0_Roundtrip(c *C) {
 	c.Assert(res, HasLen, 0)
 
 	// transport I -> R
-	msg = csI0.Encrypt(nil, nil, []byte("foo"))
+	msg, err = csI0.Encrypt(nil, nil, []byte("foo"))
+	c.Assert(err, IsNil)
 	res, err = csR0.Decrypt(nil, nil, msg)
 	c.Assert(err, IsNil)
 	c.Assert(string(res), Equals, "foo")
 
 	// transport R -> I
-	msg = csR1.Encrypt(nil, nil, []byte("bar"))
+	msg, err = csR1.Encrypt(nil, nil, []byte("bar"))
+	c.Assert(err, IsNil)
 	res, err = csI1.Decrypt(nil, nil, msg)
 	c.Assert(err, IsNil)
 	c.Assert(string(res), Equals, "bar")
@@ -523,9 +529,56 @@ func (NoiseSuite) TestHandshakeRollback(c *C) {
 	c.Assert(err, Not(IsNil))
 	msg[1] = prev
 	res, _, _, err = hsI.ReadMessage(nil, msg)
+	c.Assert(err, IsNil)
 	c.Assert(string(res), Equals, "defg")
 
 	expected, _ := hex.DecodeString("07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c5e4dc9545d41b3280f4586a5481829e1e24ec5a0")
+	c.Assert(msg, DeepEquals, expected)
+}
+
+func (NoiseSuite) TestHandshakeRollback_rs(c *C) {
+	cs := NewCipherSuite(DH25519, CipherAESGCM, HashSHA512)
+	rngI := new(RandomInc)
+	rngR := new(RandomInc)
+
+	staticI, _ := cs.GenerateKeypair(rngI)
+	staticR, _ := cs.GenerateKeypair(rngR)
+
+	*rngR = 1
+
+	hsI, _ := NewHandshakeState(Config{
+		CipherSuite:   cs,
+		Random:        rngI,
+		Pattern:       HandshakeIX,
+		Initiator:     true,
+		StaticKeypair: staticI,
+	})
+	hsR, _ := NewHandshakeState(Config{
+		CipherSuite:   cs,
+		Random:        rngR,
+		Pattern:       HandshakeIX,
+		Initiator:     false,
+		StaticKeypair: staticR,
+	})
+
+	msg, _, _, _ := hsI.WriteMessage(nil, []byte("abc"))
+	c.Assert(msg, HasLen, 67)
+	res, _, _, err := hsR.ReadMessage(nil, msg)
+	c.Assert(err, IsNil)
+	c.Assert(string(res), Equals, "abc")
+
+	msg, _, _, _ = hsR.WriteMessage(nil, []byte("defg"))
+	c.Assert(msg, HasLen, 100)
+	prev := msg[1]
+	msg[1] = msg[1] + 1
+	_, _, _, err = hsI.ReadMessage(nil, msg)
+	c.Assert(err, Not(IsNil))
+	msg[1] = prev
+	res, _, _, err = hsI.ReadMessage(nil, msg)
+	c.Assert(err, IsNil)
+	c.Assert(string(res), Equals, "defg")
+
+	expected, _ := hex.DecodeString("07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7cf66fc41515606de81af64a5364fbc0b2cbd71e0837ea590b72b77ae2caaaa93bc19c167c28236a18e0737d395fe95083e41da26a30a8062faf92ed05bbdc36db2369f19b")
 	c.Assert(msg, DeepEquals, expected)
 }
 
@@ -569,8 +622,10 @@ func (NoiseSuite) TestRekey(c *C) {
 	c.Assert(0, Equals, len(clientHsResult))
 
 	clientMessage := []byte("hello")
-	msg := csI0.Encrypt(nil, nil, clientMessage)
+	msg, err := csI0.Encrypt(nil, nil, clientMessage)
+	c.Assert(err, IsNil)
 	res, err := csR0.Decrypt(nil, nil, msg)
+	c.Assert(err, IsNil)
 	c.Assert(string(clientMessage), Equals, string(res))
 
 	oldK := csI0.k
@@ -579,27 +634,49 @@ func (NoiseSuite) TestRekey(c *C) {
 	csR0.Rekey()
 
 	clientMessage = []byte("hello again")
-	msg = csI0.Encrypt(nil, nil, clientMessage)
+	msg, err = csI0.Encrypt(nil, nil, clientMessage)
+	c.Assert(err, IsNil)
 	res, err = csR0.Decrypt(nil, nil, msg)
+	c.Assert(err, IsNil)
 	c.Assert(string(clientMessage), Equals, string(res))
 
 	serverMessage := []byte("bye")
-	msg = csR1.Encrypt(nil, nil, serverMessage)
+	msg, err = csR1.Encrypt(nil, nil, serverMessage)
+	c.Assert(err, IsNil)
 	res, err = csI1.Decrypt(nil, nil, msg)
+	c.Assert(err, IsNil)
 	c.Assert(string(serverMessage), Equals, string(res))
+
+	preNonce := csR1.Nonce()
 
 	csR1.Rekey()
 	csI1.Rekey()
 
+	postNonce := csR1.Nonce()
+	c.Assert(preNonce, Equals, postNonce)
+
 	serverMessage = []byte("bye bye")
-	msg = csR1.Encrypt(nil, nil, serverMessage)
+	msg, err = csR1.Encrypt(nil, nil, serverMessage)
+	c.Assert(err, IsNil)
 	res, err = csI1.Decrypt(nil, nil, msg)
+	c.Assert(err, IsNil)
 	c.Assert(string(serverMessage), Equals, string(res))
 
 	// only rekey one side, test for failure
 	csR1.Rekey()
 	serverMessage = []byte("bye again")
-	msg = csR1.Encrypt(nil, nil, serverMessage)
+	msg, err = csR1.Encrypt(nil, nil, serverMessage)
+	c.Assert(err, IsNil)
 	res, err = csI1.Decrypt(nil, nil, msg)
+	c.Assert(err, NotNil)
 	c.Assert(string(serverMessage), Not(Equals), string(res))
+
+	// check nonce overflow handling
+	csI1.n = math.MaxUint64
+	msg, err = csI1.Encrypt(nil, nil, nil)
+	c.Assert(err, Equals, ErrMaxNonce)
+	c.Assert(msg, IsNil)
+	msg, err = csI1.Decrypt(nil, nil, nil)
+	c.Assert(err, Equals, ErrMaxNonce)
+	c.Assert(msg, IsNil)
 }

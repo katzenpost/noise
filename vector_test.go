@@ -184,7 +184,7 @@ func (NoiseSuite) TestVectors(c *C) {
 				configR.EphemeralKeypair = ephR
 				configI.PeerEphemeral = ephR.Public
 			}
-			if strings.Index(name, "psk") != -1 {
+			if strings.Contains(name, "psk") {
 				configI.PresharedKey = psk
 				configR.PresharedKey = psk
 			}
@@ -199,7 +199,8 @@ func (NoiseSuite) TestVectors(c *C) {
 			if (i-len(configI.Pattern.Messages))%2 != 0 {
 				enc, dec = csW1, csR1
 			}
-			encrypted := enc.Encrypt(nil, nil, payload)
+			encrypted, err := enc.Encrypt(nil, nil, payload)
+			c.Assert(err, IsNil)
 			c.Assert(fmt.Sprintf("%x", encrypted), Equals, string(splitLine[1]))
 			decrypted, err := dec.Decrypt(nil, nil, encrypted)
 			c.Assert(err, IsNil)
