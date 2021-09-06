@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	. "github.com/flynn/noise"
+	. "github.com/katzenpost/noise"
 )
 
 func main() {
